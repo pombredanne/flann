@@ -185,13 +185,15 @@ public:
     /** Add a set of features to the table
      * @param dataset the values to store
      */
-    void add(Matrix<ElementType> dataset)
+    void add(const std::vector< std::pair<size_t, ElementType*> >& features)
     {
 #if USE_UNORDERED_MAP
-        if (!use_speed_) buckets_space_.rehash((buckets_space_.size() + dataset.rows) * 1.2);
+        buckets_space_.rehash((buckets_space_.size() + features.size()) * 1.2);
 #endif
         // Add the features to the table
-        for (unsigned int i = 0; i < dataset.rows; ++i) add(i, dataset[i]);
+        for (size_t i = 0; i < features.size(); ++i) {
+        	add(features[i].first, features[i].second);
+        }
         // Now that the table is full, optimize it for speed/space
         optimize();
     }
@@ -268,10 +270,10 @@ private:
         if (speed_level_ == kArray) return;
 
         // Use an array if it will be more than half full
-        if (buckets_space_.size() > (unsigned int)((1 << key_size_) / 2)) {
+        if (buckets_space_.size() > ((size_t(1) << key_size_) / 2)) {
             speed_level_ = kArray;
             // Fill the array version of it
-            buckets_speed_.resize(1 << key_size_);
+            buckets_speed_.resize(size_t(1) << key_size_);
             for (BucketsSpace::const_iterator key_bucket = buckets_space_.begin(); key_bucket != buckets_space_.end(); ++key_bucket) buckets_speed_[key_bucket->first] = key_bucket->second;
 
             // Empty the hash table
@@ -282,9 +284,9 @@ private:
         // If the bitset is going to use less than 10% of the RAM of the hash map (at least 1 size_t for the key and two
         // for the vector) or less than 512MB (key_size_ <= 30)
         if (((std::max(buckets_space_.size(), buckets_speed_.size()) * CHAR_BIT * 3 * sizeof(BucketKey)) / 10
-             >= size_t(1 << key_size_)) || (key_size_ <= 32)) {
+             >= size_t(size_t(1) << key_size_)) || (key_size_ <= 32)) {
             speed_level_ = kBitsetHash;
-            key_bitset_.resize(1 << key_size_);
+            key_bitset_.resize(size_t(1) << key_size_);
             key_bitset_.reset();
             // Try with the BucketsSpace
             for (BucketsSpace::const_iterator key_bucket = buckets_space_.begin(); key_bucket != buckets_space_.end(); ++key_bucket) key_bitset_.set(key_bucket->first);
@@ -294,6 +296,33 @@ private:
             key_bitset_.clear();
         }
     }
+
+    template<typename Archive>
+    void serialize(Archive& ar)
+    {
+    	int val;
+    	if (Archive::is_saving::value) {
+    		val = (int)speed_level_;
+    	}
+    	ar & val;
+    	if (Archive::is_loading::value) {
+    		speed_level_ = (SpeedLevel) val;
+    	}
+
+    	ar & key_size_;
+    	ar & mask_;
+
+    	if (speed_level_==kArray) {
+    		ar & buckets_speed_;
+    	}
+    	if (speed_level_==kBitsetHash || speed_level_==kHash) {
+    		ar & buckets_space_;
+    	}
+		if (speed_level_==kBitsetHash) {
+			ar & key_bitset_;
+		}
+    }
+    friend struct serialization::access;
 
     /** The vector of all the buckets if they are held for speed
      */
